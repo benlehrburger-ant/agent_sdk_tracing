@@ -59,7 +59,63 @@ After each Agent SDK conversation, `generateRichTrace()` merges all three source
 
 - **OTel spans** for structure and timing
 - **JSONL logs** for full content (OTel truncates long outputs)
-- **Proxy logs** for raw API call details
+- **Proxy logs** for raw API call details, with per-call context utilization bars
+
+## Error Detection
+
+The proxy analyzes every API call for context and error issues. When problems are detected:
+
+1. **Banner in `.trace.txt`** — a `!!!! CONTEXT HEALTH: CRITICAL !!!!` banner at the top of the trace points to the error report.
+2. **`.errors.txt` generated** — a separate file with root cause analysis, trace line references, and fix suggestions.
+
+Each API call in the trace shows a context utilization bar and inline warnings:
+
+```
+  Context: [####################] 92.3% input (184,600 / 200,000)
+  *** CRITICAL: Context utilization at 92.3% — near overflow ***
+```
+
+### Error classifications
+
+**Critical (session-breaking):**
+
+| Type | Trigger |
+|---|---|
+| `request_too_large_attachment` | Binary file (PDF/image) exceeds API's ~10MB HTTP body limit |
+| `request_too_large` | Text-only request exceeds HTTP body limit |
+| `context_overflow` | Token count exceeds model's context window |
+| `context_near_overflow` | Input token usage > 90% of context window |
+| `api_overloaded` | Anthropic servers at capacity (transient) |
+
+**Warnings:**
+
+| Type | Trigger |
+|---|---|
+| `context_high_utilization` | Input token usage > 75% of context window |
+| `output_truncated` | Response cut off (`stop_reason: max_tokens`) |
+| `rapid_context_growth` | > 50K token growth across API calls in one session |
+| `rate_limit` | 429 / rate limit error |
+
+**API Errors:**
+
+| Type | Trigger |
+|---|---|
+| `invalid_image` / `invalid_document` | Malformed or unsupported file content |
+| `invalid_tool` | Tool definition error |
+| `content_filtered` | Content policy violation |
+| `auth_error` | Invalid API key |
+| `server_error` | Anthropic 500 errors |
+
+Binary attachments are detected and sized in the trace — the report distinguishes "file too large to transmit" from "too many tokens", with different root cause explanations for each. For example, uploading a 57MB PDF produces:
+
+```
+Root cause — binary attachment(s) in the request:
+  - document (application/pdf): 57.3 MB raw, 76 MB as base64
+  Total attachment size: 57.3 MB
+
+The Anthropic API has a ~10 MB request body limit. Base64 encoding inflates
+file size by ~33%, so a file over ~7.5 MB will likely exceed this limit.
+```
 
 ## Production Readiness
 
@@ -99,5 +155,8 @@ server.js              Express server with two chat handlers
 
 public/index.html      Single-file frontend (HTML + CSS + JS)
 
-logs/                  Per-conversation directories with .jsonl and .trace.txt files
+logs/                  Per-conversation directories
+├── <id>.jsonl         Raw SDK message objects
+├── <id>.trace.txt     Rich merged trace
+└── <id>.errors.txt    Error report (only when issues detected)
 ```

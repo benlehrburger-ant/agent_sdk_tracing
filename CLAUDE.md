@@ -37,7 +37,8 @@ public/index.html      Single-file frontend (HTML + CSS + JS, no framework)
 
 logs/                  Per-conversation directories
 ├── <id>.jsonl         SDK message objects / Messages API request-response pairs
-└── <id>.trace.txt     Rich merged trace (generated after Agent SDK conversations)
+├── <id>.trace.txt     Rich merged trace (generated after Agent SDK conversations)
+└── <id>.errors.txt    Context & API error report (only generated when issues detected)
 .env                   ANTHROPIC_API_KEY (required)
 ```
 
@@ -53,6 +54,45 @@ Three complementary tracing mechanisms capture different layers of data:
 
 After each Agent SDK conversation, `generateRichTrace()` merges all three into a `.trace.txt` file.
 
+## Error Detection & Reporting
+
+The proxy analyzes every API call for context and error issues. When problems are detected, two things happen:
+
+1. **Banner in `.trace.txt`** — a `!!!! CONTEXT HEALTH: CRITICAL !!!!` banner appears at the top of the trace with a pointer to the error report.
+2. **`.errors.txt` generated** — a separate human-readable error report with root cause analysis, trace line references, and fix suggestions.
+
+Each API call in the trace also shows a **context utilization bar** (`[##..................] 7.8%`) and inline warnings at 75%/90% thresholds.
+
+### Error classifications
+
+**Critical (session-breaking):**
+| Type | Trigger |
+|---|---|
+| `request_too_large_attachment` | Binary file (PDF/image) exceeds API's ~10MB HTTP body limit |
+| `request_too_large` | Text-only request exceeds HTTP body limit |
+| `context_overflow` | Token count exceeds model's context window |
+| `context_near_overflow` | Input token usage > 90% of context window |
+| `api_overloaded` | Anthropic servers at capacity (transient) |
+
+**Warnings:**
+| Type | Trigger |
+|---|---|
+| `context_high_utilization` | Input token usage > 75% of context window |
+| `output_truncated` | Response cut off (`stop_reason: max_tokens`) |
+| `rapid_context_growth` | > 50K token growth across API calls in one session |
+| `rate_limit` | 429 / rate limit error |
+
+**API Errors:**
+| Type | Trigger |
+|---|---|
+| `invalid_image` / `invalid_document` | Malformed or unsupported file content |
+| `invalid_tool` | Tool definition error |
+| `content_filtered` | Content policy violation |
+| `auth_error` | Invalid API key |
+| `server_error` | Anthropic 500 errors |
+
+Binary attachments (PDFs, images) are detected and sized in the trace context breakdown — the report distinguishes between "file too large to transmit" (`request_too_large_attachment`) vs "too many tokens" (`context_overflow`), with different root cause explanations and fix suggestions for each.
+
 ## Key Details
 
 - **ESM project** — `"type": "module"` in package.json, use `import` not `require`
@@ -62,4 +102,4 @@ After each Agent SDK conversation, `generateRichTrace()` merges all three into a
 - **Proxy routing**: Agent SDK calls are routed through the local proxy via `ANTHROPIC_BASE_URL` env override in `query()` options
 - **OTel config**: Requires Jaeger on `localhost:16686` (or `JAEGER_URL`) and OTLP collector on `localhost:4318` (or `BETA_TRACING_ENDPOINT`)
 - **`.gitignore`** excludes `node_modules/`, `logs/`, and `.env`
-- **20MB JSON body limit** on Express for file uploads
+- **100MB JSON body limit** on Express for file uploads (large enough to proxy oversized files so the error is captured in traces rather than rejected by Express)
