@@ -1,0 +1,14 @@
+{
+  "name": "claude-chatbot",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.2",
+    "@anthropic-ai/sdk": "^0.74.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
